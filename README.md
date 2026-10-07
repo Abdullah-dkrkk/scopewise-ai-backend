@@ -92,19 +92,27 @@ ML_SERVICE_TOKEN=
 ML_FALLBACK_ENABLED=true
 ```
 
-6. Run migrations
+6. Allow the frontend origin in `.env`
+```env
+# Exact origins allowed to call the API with credentials. Keep in sync with
+# SANCTUM_STATEFUL_DOMAINS or the browser blocks every cross-origin request.
+CORS_ALLOWED_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
+SANCTUM_STATEFUL_DOMAINS=localhost,localhost:5173,127.0.0.1,127.0.0.1:5173
+```
+
+7. Run migrations
 ```bash
 php artisan migrate
 ```
 
-7. Start the queue worker
+8. Start the queue worker
 ```bash
 php artisan queue:work --queue=analysis,default
 ```
 Without a worker running, requirements stay `pending` and no analysis is
 produced.
 
-8. Start development server
+9. Start development server
 ```bash
 php artisan serve
 ```
