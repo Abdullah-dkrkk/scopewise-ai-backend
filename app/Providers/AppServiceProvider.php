@@ -83,17 +83,23 @@ class AppServiceProvider extends ServiceProvider
     private function configureRateLimiters(): void
     {
         RateLimiter::for('api', function (Request $request): Limit {
-            return Limit::perMinute(120)->by($this->throttleKey($request));
+            return Limit::perMinute((int) config('rate_limiting.api_per_minute'))
+                ->by($this->throttleKey($request));
         });
 
         RateLimiter::for('login', function (Request $request): Limit {
-            return Limit::perMinute(5)->by(Str::lower((string) $request->input('email')).'|'.$request->ip());
+            return Limit::perMinute((int) config('rate_limiting.login_per_minute'))
+                ->by(Str::lower((string) $request->input('email')).'|'.$request->ip());
         });
 
-        RateLimiter::for('register', fn (Request $request): Limit => Limit::perHour(3)->by($request->ip()));
+        RateLimiter::for('register', function (Request $request): Limit {
+            return Limit::perHour((int) config('rate_limiting.register_per_hour'))
+                ->by($request->ip());
+        });
 
         RateLimiter::for('analyze', function (Request $request): Limit {
-            return Limit::perMinute(20)->by($this->throttleKey($request));
+            return Limit::perMinute((int) config('rate_limiting.analyze_per_minute'))
+                ->by($this->throttleKey($request));
         });
     }
 

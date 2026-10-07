@@ -35,6 +35,8 @@
         <env name="CORS_ALLOWED_ORIGINS_PATTERNS" value=""/>
         <env name="SANCTUM_STATEFUL_DOMAINS" value="localhost,localhost:5173,127.0.0.1,127.0.0.1:5173"/>
         <env name="SANCTUM_EXPIRATION" value="1440"/>
+        <!-- Pinned so a loosened local .env cannot make AuthRateLimitTest flaky. -->
+        <env name="REGISTER_RATE_LIMIT_PER_HOUR" value="3"/>
         <!-- Point ML calls at an unroutable address so no test can ever reach a
              real inference service. Tests opt into the heuristic explicitly. -->
         <env name="ML_SERVICE_URL" value="http://127.0.0.1:9"/>
