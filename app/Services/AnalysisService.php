@@ -4,12 +4,18 @@ declare(strict_types=1);
 
 namespace App\Services;
 
+use App\Enums\AnalysisStatus;
+use App\Enums\RequirementStatus;
 use App\Http\Resources\AnalysisResource;
+use App\Jobs\AnalyzeRequirement;
 use App\Models\Analysis;
+use App\Models\Requirement;
 use App\Support\Pagination;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Log;
+use Throwable;
 
 class AnalysisService
 {
@@ -103,7 +109,7 @@ class AnalysisService
 
         try {
             return Carbon::parse($value);
-        } catch (\Throwable) {
+        } catch (Throwable) {
             return null;
         }
     }
@@ -131,19 +137,95 @@ class AnalysisService
             abort(404, 'Question not found');
         }
 
+        // Only a clarification job re-runs; a completed analysis just gets a
+        // slightly higher confidence from the extra answers.
+        $willRerun = $this->isPendingClarification($analysis)
+            && $this->allAnswered($questions);
+
         $analysis->update([
             'questions' => $questions,
             'confidence' => $this->calculateConfidence($analysis, $questions),
         ]);
+
+        if ($willRerun) {
+            $this->rerunWithAnswers($analysis, $questions);
+        }
 
         $fresh = $analysis->fresh();
         $fresh->load('modules', 'riskFactors', 'requirement');
 
         return response()->json([
             'success' => true,
-            'message' => 'Answer recorded',
+            'message' => $willRerun ? 'All answers recorded, refining analysis' : 'Answer recorded',
             'data' => new AnalysisResource($fresh),
         ]);
+    }
+
+    /**
+     * The requirements pointed at a provisional result that needs answers
+     * before a final estimate.
+     */
+    private function isPendingClarification(Analysis $analysis): bool
+    {
+        $status = (string) ($analysis->status?->value ?? $analysis->status ?? 'completed');
+        $meta = is_array($analysis->meta) ? $analysis->meta : [];
+        $clarification = is_array($meta['clarification'] ?? null) ? $meta['clarification'] : [];
+
+        return $status === 'needs_clarification'
+            || ($status === 'completed' && ! empty($clarification['needed']));
+    }
+
+    /**
+     * @param  list<array{id: string, question: string, category: string, priority: string, status: string, answer: string|null}>  $questions
+     */
+    private function allAnswered(array $questions): bool
+    {
+        foreach ($questions as $question) {
+            if ((string) ($question['status'] ?? '') !== 'answered') {
+                return false;
+            }
+        }
+
+        return $questions !== [];
+    }
+
+    /**
+     * Every answer in, so re-queue with the q&a as context and let the
+     * pipeline replace the provisional estimate with a sharper one.
+     *
+     * @param  list<array{id: string, question: string, category: string, priority: string, status: string, answer: string|null}>  $questions
+     */
+    private function rerunWithAnswers(Analysis $analysis, array $questions): void
+    {
+        $requirement = Requirement::find($analysis->requirement_id);
+
+        if (! $requirement instanceof Requirement) {
+            return;
+        }
+
+        // Answers turn into "Clarifications:" lines appended to the text the
+        // pipeline sends on. Empty answers (skipped questions) are dropped.
+        $context = array_values(array_filter(array_map(
+            static fn (array $q): ?array => ! empty($q['answer'])
+                ? ['question' => (string) $q['question'], 'answer' => (string) $q['answer']]
+                : null,
+            $questions,
+        )));
+
+        $requirement->forceFill(['status' => RequirementStatus::Pending->value])->save();
+
+        $analysis->forceFill([
+            'status' => AnalysisStatus::Processing->value,
+        ])->save();
+
+        try {
+            AnalyzeRequirement::dispatch($requirement->id, $context)->afterCommit();
+        } catch (Throwable $exception) {
+            Log::error('Failed to dispatch refinement analysis', [
+                'requirement_id' => $requirement->id,
+                'message' => $exception->getMessage(),
+            ]);
+        }
     }
 
     private function calculateConfidence(Analysis $analysis, array $questions): int

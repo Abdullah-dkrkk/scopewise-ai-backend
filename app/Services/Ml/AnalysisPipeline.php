@@ -28,9 +28,10 @@ final class AnalysisPipeline
     /**
      * Analyze a requirement and persist the result.
      *
+     * @param  list<array{question: string, answer: string}>  $context
      * @return array{analysis_id: int, source: string, fell_back: bool}
      */
-    public function run(string $requirementId): array
+    public function run(string $requirementId, array $context = []): array
     {
         $requirement = Requirement::find($requirementId);
 
@@ -49,7 +50,7 @@ final class AnalysisPipeline
         // The previous analysis is replaced inside the writer's transaction, not
         // here. Deleting before the estimate would leave a requirement with no
         // analysis at all if the ML call failed and fallback was disabled.
-        $result = $this->estimate($requirement->content);
+        $result = $this->estimate($requirement->content, $context);
 
         $analysis = $this->writer->persist($requirement, $result);
 
@@ -62,13 +63,16 @@ final class AnalysisPipeline
 
     /**
      * Produce an estimate, preferring the ML service.
+     *
+     * @param  list<array{question: string, answer: string}>  $context
      */
-    public function estimate(string $text): MlAnalysisResult
+    public function estimate(string $text, array $context = []): MlAnalysisResult
     {
         $fallbackEnabled = (bool) config('services.ml.fallback_to_heuristic', true);
+        $prompt = $this->withContext($text, $context);
 
         try {
-            $payload = $this->client->analyze($text);
+            $payload = $this->client->analyze($prompt);
 
             return MlAnalysisResult::fromPayload($payload);
         } catch (Throwable $exception) {
@@ -81,8 +85,31 @@ final class AnalysisPipeline
                 throw $exception;
             }
 
-            return $this->heuristicResult($text);
+            return $this->heuristicResult($prompt);
         }
+    }
+
+    /**
+     * Answers to the clarifying questions are folded into the text so both the
+     * model and the heuristic can weigh them.
+     *
+     * @param  list<array{question: string, answer: string}>  $context
+     */
+    private function withContext(string $text, array $context): string
+    {
+        if ($context === []) {
+            return $text;
+        }
+
+        $lines = array_map(
+            static fn (array $item): string => vsprintf(
+                '- %s: %s',
+                [(string) $item['question'], (string) $item['answer']]
+            ),
+            $context,
+        );
+
+        return $text."\n\nClarifications:\n".implode("\n", $lines);
     }
 
     /**

@@ -288,7 +288,18 @@ def create_app(settings: Settings | None = None, *, warm_up: bool = True) -> Fla
         from core.question_generator import generate_questions
         from core.risk_scorer import assess_risk
         from core.timeline_estimator import estimate_timeline
+        from core.llm import (
+            build_prompt,
+            call_gemini,
+            estimate_margin,
+            normalize_llm_output,
+            rule_based_vagueness,
+            split_clarifications,
+        )
 
+        # ------------------------------------------------------------------
+        # 1. Deterministic pipeline (the numbers engine, always on).
+        # ------------------------------------------------------------------
         classification = classify_requirement(text)
         category = classification["predicted_category"]
 
@@ -306,13 +317,6 @@ def create_app(settings: Settings | None = None, *, warm_up: bool = True) -> Fla
             category=category,
         )
 
-        questions = generate_questions(
-            text=text,
-            category=category,
-            complexity_score=complexity_score,
-            detected_features=detected_features,
-        )[:MAX_QUESTION_COUNT]
-
         timeline = estimate_timeline(
             complexity_score=complexity_score,
             feature_count=feature_count,
@@ -320,6 +324,124 @@ def create_app(settings: Settings | None = None, *, warm_up: bool = True) -> Fla
             risk_level=risk["overall_risk"],
             complexity_level=complexity["complexity_level"],
         )
+
+        # ------------------------------------------------------------------
+        # 2. Optional Gemini refinement layer (understanding + questions).
+        # ------------------------------------------------------------------
+        engine = "local"
+        gemini = None
+
+        if settings.gemini_api_key:
+            gemini = normalize_llm_output(
+                call_gemini(
+                    settings.gemini_api_key,
+                    settings.gemini_model,
+                    build_prompt(
+                        text,
+                        max_questions=settings.gemini_max_questions,
+                        max_risk_factors=settings.gemini_max_risk_factors,
+                    ),
+                    timeout=settings.gemini_timeout,
+                    fallbacks=tuple(settings.gemini_model_fallbacks),
+                ),
+                max_questions=settings.gemini_max_questions,
+                max_risk_factors=settings.gemini_max_risk_factors,
+            )
+
+            if gemini is not None:
+                engine = "gemini"
+                category = gemini["category"]
+                classification["predicted_category"] = category
+                classification["confidence"] = gemini["confidence"]
+
+        # ------------------------------------------------------------------
+        # 3. Vagueness detection — deterministic rules + Gemini verdict.
+        #
+        # The backend appends answered clarifying questions as a trailing
+        # "Clarifications:" block. Once answers exist the requirement has been
+        # clarified: judge vagueness on the original text only and do not flag
+        # it again, even when the original phrasing was terse.
+        # ------------------------------------------------------------------
+        base_text, clarifications = split_clarifications(text)
+        rule_vague, rule_reason = rule_based_vagueness(base_text)
+        llm_vague = bool(gemini and gemini["is_vague"])
+        clarified = len(clarifications) > 0
+
+        if llm_vague:
+            needs_clarification = llm_vague and not clarified
+            clarification_reason = gemini["vagueness_reason"] or rule_reason
+        else:
+            needs_clarification = rule_vague and not clarified
+            clarification_reason = rule_reason
+
+        # ------------------------------------------------------------------
+        # 4. Questions — Gemini's pinpointed ones when available, otherwise
+        #    the deterministic templates. The vague path always carries the
+        #    pointed questions so the owner can answer them.
+        # ------------------------------------------------------------------
+        if gemini and gemini["questions"]:
+            questions = gemini["questions"]
+            summary = gemini["summary"] or _generate_summary(
+                category=category,
+                complexity_score=complexity_score,
+                complexity_level=complexity["complexity_level"],
+                risk_level=risk["overall_risk"],
+                feature_count=feature_count,
+                estimated_hours=timeline["total_estimated_hours"],
+                timeline_weeks=timeline["recommended_timeline_weeks"],
+            )
+        else:
+            questions = generate_questions(
+                text=text,
+                category=category,
+                complexity_score=complexity_score,
+                detected_features=detected_features,
+            )[:MAX_QUESTION_COUNT]
+            summary = _generate_summary(
+                category=category,
+                complexity_score=complexity_score,
+                complexity_level=complexity["complexity_level"],
+                risk_level=risk["overall_risk"],
+                feature_count=feature_count,
+                estimated_hours=timeline["total_estimated_hours"],
+                timeline_weeks=timeline["recommended_timeline_weeks"],
+            )
+
+        # ------------------------------------------------------------------
+        # 5. Risk factors — Gemini's text-derived factors merged with the
+        #    deterministic ones, deduplicated by factor name.
+        # ------------------------------------------------------------------
+        risk_factors = [
+            {
+                "factor": factor["factor"],
+                "level": "high" if factor["level"] == "critical" else factor["level"],
+                "description": factor.get("description"),
+                "mitigation": factor.get("mitigation"),
+            }
+            for factor in risk["risk_factors"]
+        ]
+
+        if gemini and gemini["risk_factors"]:
+            seen_factors = {factor["factor"].lower() for factor in risk_factors}
+
+            for factor in gemini["risk_factors"]:
+                factor_key = factor["factor"].lower()
+
+                if factor_key in seen_factors:
+                    continue
+
+                seen_factors.add(factor_key)
+                risk_factors.append(
+                    {
+                        "factor": factor["factor"],
+                        "level": factor["level"],
+                        "description": factor["reason"],
+                        "mitigation": factor["mitigation"],
+                    }
+                )
+
+                if len(risk_factors) >= 12:
+                    break
 
         modules = []
         for feat in features["features"]:
@@ -347,53 +469,45 @@ def create_app(settings: Settings | None = None, *, warm_up: bool = True) -> Fla
                 }
             )
 
-        return jsonify(
-            {
-                "classification": {
-                    "category": category,
-                    "confidence": classification["confidence"],
-                    "alternatives": classification["alternatives"],
-                },
-                "complexity": {
-                    "score": complexity_score,
-                    "level": complexity["complexity_level"],
-                    "breakdown": complexity["breakdown"],
-                },
-                "features": {
-                    "detected": features["features"],
-                    "total_count": feature_count,
-                    "summary": detected_features,
-                },
-                "risk": {
-                    "overall_level": risk["overall_risk"],
-                    "score": risk["risk_score"],
-                    "total_risk_factors": len(risk["risk_factors"]),
-                    "factors": [
-                        {
-                            "factor": factor["factor"],
-                            # risk_factors.level only permits low/medium/high,
-                            # so a critical verdict is reported as high.
-                            "level": "high" if factor["level"] == "critical" else factor["level"],
-                            "description": factor.get("description"),
-                            "mitigation": factor.get("mitigation"),
-                        }
-                        for factor in risk["risk_factors"]
-                    ],
-                },
-                "questions": questions,
-                "timeline": timeline,
-                "modules": modules,
-                "summary": _generate_summary(
-                    category=category,
-                    complexity_score=complexity_score,
-                    complexity_level=complexity["complexity_level"],
-                    risk_level=risk["overall_risk"],
-                    feature_count=feature_count,
-                    estimated_hours=timeline["total_estimated_hours"],
-                    timeline_weeks=timeline["recommended_timeline_weeks"],
-                ),
-            }
-        )
+        response = {
+            "engine": engine,
+            "needs_clarification": needs_clarification,
+            "clarification_reason": clarification_reason,
+            "classification": {
+                "category": category,
+                "confidence": classification["confidence"],
+                "alternatives": classification["alternatives"],
+            },
+            "complexity": {
+                "score": complexity_score,
+                "level": complexity["complexity_level"],
+                "breakdown": complexity["breakdown"],
+            },
+            "features": {
+                "detected": features["features"],
+                "total_count": feature_count,
+                "summary": detected_features,
+            },
+            "risk": {
+                "overall_level": risk["overall_risk"],
+                "score": risk["risk_score"],
+                "total_risk_factors": len(risk_factors),
+                "factors": risk_factors,
+            },
+            "questions": questions,
+            "timeline": timeline,
+            "modules": modules,
+            "summary": summary,
+        }
+
+        # --------------------------------------------------------------
+        # 6. Vague input: instead of a fake-precise single number, return a
+        #    realistic provisional band around the deterministic estimate.
+        # --------------------------------------------------------------
+        if needs_clarification:
+            response["estimate_band"] = estimate_margin(timeline["total_estimated_hours"])
+
+        return jsonify(response)
 
     @app.route("/classify", methods=["POST"])
     def classify():

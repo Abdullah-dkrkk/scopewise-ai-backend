@@ -61,6 +61,9 @@ class TestAnalyzeContract:
             "timeline",
             "modules",
             "summary",
+            "engine",
+            "needs_clarification",
+            "clarification_reason",
         ):
             assert section in body, f"missing {section}"
 
@@ -70,6 +73,39 @@ class TestAnalyzeContract:
         assert "total_risk_factors" in body["risk"]
         assert body["risk"]["total_risk_factors"] == len(body["risk"]["factors"])
         assert "total_estimated_hours" in body["timeline"]
+
+    def test_engine_is_an_honest_source_label(self, client):
+        body = client.post("/analyze", json={"text": PAYMENT_REQUIREMENT}, headers=AUTH_HEADERS).get_json()
+
+        assert body["engine"] in ("local", "gemini")
+
+    def test_needs_clarification_is_always_a_boolean(self, client):
+        body = client.post("/analyze", json={"text": PAYMENT_REQUIREMENT}, headers=AUTH_HEADERS).get_json()
+
+        assert isinstance(body["needs_clarification"], bool)
+
+    def test_vague_input_gets_a_realistic_estimate_band(self, client):
+        body = client.post(
+            "/analyze",
+            json={"text": "make it fast sort of like a shop and stuff"},
+            headers=AUTH_HEADERS,
+        ).get_json()
+
+        assert body["needs_clarification"] is True
+        assert body["clarification_reason"]
+
+        band = body["estimate_band"]
+        hours = body["timeline"]["total_estimated_hours"]
+
+        assert band["low"] <= band["high"]
+        assert band["low"] >= hours
+        assert band["note"]
+
+    def test_clear_input_has_no_estimate_band(self, client):
+        body = client.post("/analyze", json={"text": PAYMENT_REQUIREMENT}, headers=AUTH_HEADERS).get_json()
+
+        assert body["needs_clarification"] is False
+        assert "estimate_band" not in body
 
     def test_complexity_score_is_within_the_persisted_range(self, client):
         body = client.post(

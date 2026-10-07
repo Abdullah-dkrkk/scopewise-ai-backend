@@ -36,6 +36,8 @@ final class AnalysisWriter
             // previous analysis instead.
             $requirement->analysis()->delete();
 
+            $needsClarification = $result->needsClarification;
+
             $analysis = Analysis::create([
                 'requirement_id' => $requirement->id,
                 // Denormalised so history can filter and render without a join.
@@ -53,7 +55,12 @@ final class AnalysisWriter
                 'confidence' => $result->confidence,
                 'questions' => $result->questions,
                 'meta' => $this->meta($result),
-                'status' => AnalysisStatus::Completed,
+                // A vague requirement is not "done": the analyse row holds the
+                // provisional estimate plus pointed questions until the owner
+                // answers them and the analysis is re-run.
+                'status' => $needsClarification
+                    ? AnalysisStatus::NeedsClarification
+                    : AnalysisStatus::Completed,
                 'progress' => 100,
             ]);
 
@@ -82,7 +89,9 @@ final class AnalysisWriter
             }
 
             $requirement->forceFill([
-                'status' => RequirementStatus::Analyzed,
+                'status' => $needsClarification
+                    ? RequirementStatus::Pending
+                    : RequirementStatus::Analyzed,
             ])->save();
 
             Log::info('Requirement analysis persisted', [
@@ -112,6 +121,17 @@ final class AnalysisWriter
             'milestones' => $result->milestones,
             'timeline' => $result->timeline,
         ];
+
+        if ($result->needsClarification) {
+            $meta['clarification'] = [
+                'needed' => true,
+                'reason' => $result->clarificationReason,
+                'estimate_band' => [
+                    'low' => $result->estimateLow,
+                    'high' => $result->estimateHigh,
+                ],
+            ];
+        }
 
         foreach ($meta as $value) {
             if ($value !== null && $value !== []) {

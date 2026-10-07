@@ -71,6 +71,13 @@ class AnalyzeRequirement implements ShouldBeUnique, ShouldQueue
 
     public function __construct(
         public readonly int $requirementId,
+        /**
+         * Answers to the clarifying questions, appended to the requirement text
+         * so a re-analysis after clarification produces a sharper estimate.
+         *
+         * @var list<array{question: string, answer: string}>|null
+         */
+        public readonly ?array $context = null,
     ) {
         $this->onQueue('analysis');
     }
@@ -86,7 +93,7 @@ class AnalyzeRequirement implements ShouldBeUnique, ShouldQueue
 
     public function handle(AnalysisPipeline $pipeline): void
     {
-        $pipeline->run((string) $this->requirementId);
+        $pipeline->run((string) $this->requirementId, $this->context ?? []);
     }
 
     /**

@@ -35,6 +35,9 @@ class AnalysisResource extends JsonResource
             'status' => $this->status?->value ?? $this->status ?? 'completed',
             'progress' => (int) ($this->progress ?? 100),
             'error' => $this->error,
+            'needsClarification' => $this->needsClarification(),
+            'clarificationReason' => $this->clarificationReason(),
+            'estimateBand' => $this->estimateBand($hours, $meta),
             'complexity' => (int) round((float) $this->complexity_score * 20),
             'complexityLevel' => $this->getComplexityLevel((float) $this->complexity_score),
             'complexityBreakdown' => $this->getBreakdown($meta, (float) $this->complexity_score),
@@ -60,6 +63,63 @@ class AnalysisResource extends JsonResource
             'summary' => $this->summary,
             'createdAt' => $this->created_at?->toISOString(),
             'updatedAt' => $this->updated_at?->toISOString(),
+        ];
+    }
+
+    /**
+     * A vague requirement produces a provisional result; the row is never
+     * labelled "completed" until the owner answers the clarifying questions.
+     */
+    private function needsClarification(): bool
+    {
+        $status = (string) ($this->status?->value ?? $this->status ?? 'completed');
+
+        if ($status === 'needs_clarification') {
+            return true;
+        }
+
+        $meta = is_array($this->meta) ? $this->meta : [];
+        $clarification = $meta['clarification'] ?? null;
+
+        return is_array($clarification) && ! empty($clarification['needed']);
+    }
+
+    private function clarificationReason(): ?string
+    {
+        $meta = is_array($this->meta) ? $this->meta : [];
+        $clarification = $meta['clarification'] ?? null;
+
+        if (is_array($clarification) && ! empty($clarification['reason'])) {
+            return (string) $clarification['reason'];
+        }
+
+        return $this->needsClarification()
+            ? 'This requirement is too vague to estimate precisely yet.'
+            : null;
+    }
+
+    /**
+     * @param  array<string, mixed>  $meta
+     * @return array{low: float|null, high: float|null, note: string|null}|null
+     */
+    private function estimateBand(float $hours, array $meta): ?array
+    {
+        if (! $this->needsClarification()) {
+            return null;
+        }
+
+        $clarification = is_array($meta['clarification'] ?? null) ? $meta['clarification'] : [];
+        $band = is_array($clarification['estimate_band'] ?? null) ? $clarification['estimate_band'] : [];
+
+        $low = isset($band['low']) ? (float) $band['low'] : $hours;
+        $high = isset($band['high']) ? (float) $band['high'] : $hours;
+
+        return [
+            'low' => $low,
+            'high' => $high,
+            'note' => is_array($band) && ! empty($band['note'])
+                ? (string) $band['note']
+                : 'Provisional range until the clarifying questions are answered.',
         ];
     }
 

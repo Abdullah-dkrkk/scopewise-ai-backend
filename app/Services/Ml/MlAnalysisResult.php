@@ -51,6 +51,10 @@ final class MlAnalysisResult
         public readonly array $milestones = [],
         public readonly ?array $breakdown = null,
         public readonly ?array $timeline = null,
+        public readonly bool $needsClarification = false,
+        public readonly ?float $estimateLow = null,
+        public readonly ?float $estimateHigh = null,
+        public readonly ?string $clarificationReason = null,
     ) {}
 
     /**
@@ -93,12 +97,22 @@ final class MlAnalysisResult
             self::defaultHours($complexityScore)
         );
 
+        $estimateBand = self::estimateBand(
+            data_get($payload, 'estimate_band'),
+            $estimatedHours
+        );
+
         return new self(
             classification: $classification,
             complexityScore: $complexityScore,
             riskLevel: $riskLevel,
             estimatedHours: $estimatedHours,
-            estimationMethod: 'ml_service',
+            // Honest attribution: "gemini_refined" when the LLM layer
+            // contributed understanding, "ml_service" for the pure local
+            // pipeline. Hours always come from the deterministic estimator.
+            estimationMethod: (string) data_get($payload, 'engine', 'local') === 'gemini'
+                ? 'gemini_refined'
+                : 'ml_service',
             modules: self::normalizeModules(data_get($payload, 'modules')),
             riskFactors: self::normalizeRiskFactors(data_get($payload, 'risk.factors')),
             summary: self::stringOrNull(data_get($payload, 'summary'), 2000),
@@ -113,6 +127,13 @@ final class MlAnalysisResult
             milestones: self::normalizeMilestones(data_get($payload, 'timeline.milestones')),
             breakdown: self::normalizeBreakdown(data_get($payload, 'complexity.breakdown')),
             timeline: self::normalizeTimeline($payload),
+            needsClarification: (bool) data_get($payload, 'needs_clarification', false),
+            estimateLow: $estimateBand['low'],
+            estimateHigh: $estimateBand['high'],
+            clarificationReason: self::stringOrNull(
+                data_get($payload, 'clarification_reason'),
+                500
+            ),
         );
     }
 
@@ -431,6 +452,29 @@ final class MlAnalysisResult
         }
 
         return $normalized;
+    }
+
+    /**
+     * @return array{low: float|null, high: float|null}
+     */
+    private static function estimateBand(mixed $band, float $estimatedHours): array
+    {
+        if (! is_array($band)) {
+            return ['low' => null, 'high' => null];
+        }
+
+        $low = self::nullableFloat(data_get($band, 'low'), 0.0, 50000.0);
+        $high = self::nullableFloat(data_get($band, 'high'), 0.0, 50000.0);
+
+        if ($low === null && $high === null) {
+            // A present-but-empty band still needs honest bounds.
+            return ['low' => $estimatedHours, 'high' => $estimatedHours];
+        }
+
+        return [
+            'low' => $low ?? $estimatedHours,
+            'high' => $high ?? $estimatedHours,
+        ];
     }
 
     /**

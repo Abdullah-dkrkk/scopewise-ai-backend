@@ -156,11 +156,13 @@ class RequirementService
      *
      * Dispatched after the transaction commits so a worker can never look up a
      * requirement row that has not landed yet.
+     *
+     * @param  list<array{question: string, answer: string}>  $context
      */
-    private function dispatchAnalysis(Requirement $requirement): void
+    private function dispatchAnalysis(Requirement $requirement, array $context = []): void
     {
         try {
-            AnalyzeRequirement::dispatch($requirement->id)->afterCommit();
+            AnalyzeRequirement::dispatch($requirement->id, $context)->afterCommit();
         } catch (Throwable $exception) {
             // A queue outage must not fail the user's write. The requirement is
             // stored and an operator can re-trigger the analysis later.
