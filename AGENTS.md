@@ -149,8 +149,8 @@ app/
 ---
 
 ## Tech Stack
-- Laravel 10
-- PHP 8.1+
+- Laravel 13
+- PHP 8.3+
 - MySQL/PostgreSQL
 - Laravel Sanctum (Authentication)
 - Swagger/OpenAPI (API Documentation)
@@ -247,16 +247,21 @@ app/
 - `DELETE /api/projects/{id}` - Delete project (requires auth)
 
 ### Requirements
-- `POST /api/requirements/analyze` - Submit requirement text (requires auth)
+- `POST /api/requirements` - Create requirement, queues analysis (returns 201)
+- `POST /api/requirements/{id}/analyze` - Re-run analysis (returns 202)
 - `GET /api/requirements/{id}` - Get requirement details (requires auth)
 - `GET /api/projects/{id}/requirements` - List project requirements (requires auth)
-- `PUT /api/requirements/{id}` - Update requirement (requires auth)
+- `PUT /api/requirements/{id}` - Update requirement, re-queues if content changed
 - `DELETE /api/requirements/{id}` - Delete requirement (requires auth)
 
 ### Analysis
 - `GET /api/analysis/{id}` - Get analysis results (requires auth)
 - `GET /api/analysis/{id}/questions` - Get generated questions (requires auth)
 - `GET /api/history` - Get analysis history (requires auth)
+
+All authenticated routes additionally require the matching Sanctum ability
+(`projects:read`, `projects:write`, `requirements:read`, `requirements:write`,
+`analysis:read`) and are scoped to the owner by policies.
 
 ---
 
@@ -279,7 +284,14 @@ SANCTUM_STATEFUL_DOMAINS=localhost:5173
 SESSION_DRIVER=cookie
 CACHE_DRIVER=file
 
+QUEUE_CONNECTION=database
+
 ML_SERVICE_URL=http://localhost:5000
+# Shared secret; must equal the ML service's ML_SERVICE_API_KEY.
+ML_SERVICE_TOKEN=
+ML_SERVICE_TIMEOUT=30
+# false makes ML failures surface instead of falling back to the heuristic.
+ML_FALLBACK_ENABLED=true
 ```
 
 ---
@@ -301,10 +313,16 @@ php artisan migrate
 # Seed database (optional)
 php artisan db:seed
 
+# Start the queue worker (analysis happens here, not in the request)
+php artisan queue:work --queue=analysis,default
+
 # Start development server
 php artisan serve
 
 # Server runs at http://localhost:8000
+
+# ML service (separate terminal, optional; the backend falls back without it)
+cd ml-service && python app.py
 
 # Generate Swagger documentation
 php artisan l5-swagger:generate
@@ -328,4 +346,80 @@ php artisan test --coverage
 
 # Run feature tests only
 php artisan test --testsuite=Feature
+
+# Code style check
+vendor\bin\pint --test
+
+# ML service tests
+cd ml-service && pytest
 ```
+
+---
+
+## Analysis Pipeline (Wave 2+)
+
+Requirement analysis is **asynchronous**. There is no synchronous ML call in a
+controller or route.
+
+### Flow
+
+```
+POST /api/requirements
+  → RequirementService::store()
+  → AnalyzeRequirement::dispatch()->afterCommit()  (queue: "analysis")
+  → AnalysisPipeline::run()
+      → MlClient::analyze()          (30s timeout, 3 attempts, X-Service-Token)
+      → MlAnalysisResult::fromPayload()   (clamp + validate untrusted payload)
+      → AnalysisWriter::persist()         (single transaction)
+  → AnalysisWriter sets status = analyzed
+```
+
+### Non-negotiable rules
+
+- **`estimation_method` must be honest.** `ml_service` only when the ML service
+  answered. Any local heuristic result is `heuristic_fallback`. Never label a
+  rule-based estimate as a model prediction.
+- **Never call the ML service from a controller.** Use `AnalyzeRequirement`.
+- **Always dispatch with `afterCommit()`.** A worker must never look up a
+  requirement row that has not committed.
+- **Clamp every ML value.** `MlAnalysisResult` is the only place that turns
+  untrusted JSON into a persistable result. Do not bypass it.
+- **Never store a partially written analysis.** `AnalysisWriter::persist()`
+  wraps the parent, modules and risk factors in one `DB::transaction`.
+- **A requirement has exactly one analysis.** `analyses.requirement_id` has a
+  unique index. `AnalysisWriter::persist()` deletes the previous row *inside*
+  the same transaction as the insert, so a failed re-analysis rolls back to the
+  previous result rather than leaving the requirement with nothing.
+- **Never pre-delete an analysis to "make room".** `POST .../analyze` clears the
+  stale analysis in the request on purpose, so the UI cannot render an outdated
+  estimate next to a `pending` status. That is a presentation decision, not a
+  persistence one, and it is the only place it belongs.
+- **The ML service must never block a user request.** Timeouts, retries and the
+  queue exist for this reason.
+
+### Failure behaviour
+
+| Failure | Behaviour |
+|---------|-----------|
+| ML unreachable / 5xx / timeout | Retry (3 attempts), then heuristic fallback |
+| ML 4xx | No retry, then heuristic fallback |
+| Unrecognised ML payload | Heuristic fallback, payload discarded |
+| Database failure | Transaction rolls back, job retries, previous analysis survives |
+| Retries exhausted | Requirement reset to `pending` and re-analysable |
+| `ML_FALLBACK_ENABLED=false` | Failure surfaces instead of falling back |
+
+The job is `ShouldBeUnique` per requirement, so a double click or a duplicate
+dispatch cannot queue two competing analyses. `failed()` removes any partial
+analysis and resets the requirement to `pending` rather than leaving it looking
+complete.
+
+### Adding a field to the analysis
+
+1. Add a migration.
+2. Add it to `MlAnalysisResult` with clamping.
+3. Add it to `AnalysisWriter::persist()`.
+4. Add it to `AnalysisResource`.
+5. Extend `MlPipelineTest` and `ml-service/tests/test_analyze_contract.py`.
+
+The PHP and Python tests must be updated together: the Python side owns the
+response shape, the PHP side owns the database shape.

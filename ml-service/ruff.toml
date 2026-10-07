@@ -1,0 +1,36 @@
+# Ruff configuration for the ScopeWise ML service.
+# Run from the repository root: python -m ruff check ml-service
+
+target-version = "py313"
+line-length = 110
+
+[lint]
+select = [
+    "E",    # pycodestyle errors
+    "F",    # pyflakes
+    "W",    # warnings
+    "I",    # import order
+    "B",    # bugbear
+    "UP",   # pyupgrade
+    "SIM",  # simplify
+    "C4",   # comprehensions
+    "RET",  # return consistency
+    "ARG",  # unused arguments
+    "PTH",  # prefer pathlib
+    "S",    # bandit security checks
+]
+ignore = [
+    # Response payload shapes are validated on the Laravel side.
+    "E501",
+    "B008",
+    # Asserts in tests are the point.
+    "S101",
+]
+
+[lint.per-file-ignores]
+# Tests may import after adjusting sys.path.
+"tests/*" = ["E402", "ARG001", "ARG002", "S"]
+# app.py inserts its own directory into sys.path before local imports.
+"app.py" = ["E402"]
+# Model files resolve paths from the project layout.
+"core/*" = ["E402"]

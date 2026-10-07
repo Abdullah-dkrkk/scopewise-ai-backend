@@ -1,0 +1,28 @@
+services:
+  ml-service:
+    build:
+      context: ./ml-service
+    image: scopewise-ml:latest
+    restart: unless-stopped
+    environment:
+      ML_ENV: production
+      ML_SERVICE_API_KEY: ${ML_SERVICE_API_KEY:?ML_SERVICE_API_KEY is required}
+      ML_ENABLE_TRAINING: "false"
+      ML_CORS_ORIGINS: ""
+      ML_MAX_TEXT_LENGTH: "20000"
+      ML_MAX_CONTENT_LENGTH: "65536"
+    # Published on loopback only. The ML service must never be reachable from
+    # another host; the shared secret is its only authentication layer.
+    ports:
+      - "127.0.0.1:5000:5000"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:5000/ready"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          # scikit-learn plus the two GradientBoosting models need headroom.
+          memory: 1g

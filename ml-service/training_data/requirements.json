@@ -1,0 +1,53 @@
+[
+  {"text": "User login and registration system with email verification and password reset functionality", "category": "authentication", "complexity": 3.2, "risk": "medium", "modules": 5, "hours": 40},
+  {"text": "Admin dashboard with user management, role-based access control and audit logging", "category": "authentication", "complexity": 4.1, "risk": "high", "modules": 7, "hours": 65},
+  {"text": "Social login integration with Google OAuth and GitHub OAuth providers", "category": "authentication", "complexity": 2.8, "risk": "medium", "modules": 3, "hours": 25},
+  {"text": "Two-factor authentication with SMS and email OTP verification", "category": "authentication", "complexity": 3.5, "risk": "high", "modules": 4, "hours": 35},
+  {"text": "JWT token based API authentication with refresh token rotation", "category": "authentication", "complexity": 3.0, "risk": "medium", "modules": 3, "hours": 30},
+
+  {"text": "Product catalog with categories, filters, search and sorting capabilities", "category": "e-commerce", "complexity": 3.5, "risk": "medium", "modules": 6, "hours": 50},
+  {"text": "Shopping cart with add remove update quantity and persistent cart storage", "category": "e-commerce", "complexity": 2.8, "risk": "low", "modules": 4, "hours": 30},
+  {"text": "Payment integration with Stripe and PayPal including refund handling", "category": "e-commerce", "complexity": 4.5, "risk": "high", "modules": 5, "hours": 70},
+  {"text": "Order management system with status tracking and notification emails", "category": "e-commerce", "complexity": 3.8, "risk": "medium", "modules": 6, "hours": 55},
+  {"text": "Inventory management with stock alerts and automatic reorder system", "category": "e-commerce", "complexity": 4.0, "risk": "high", "modules": 5, "hours": 60},
+  {"text": "Multi-vendor marketplace with seller dashboard and commission system", "category": "e-commerce", "complexity": 5.0, "risk": "critical", "modules": 12, "hours": 120},
+
+  {"text": "Admin dashboard with charts graphs and real-time analytics widgets", "category": "dashboard", "complexity": 3.3, "risk": "medium", "modules": 5, "hours": 45},
+  {"text": "Sales analytics report with date range filtering and export to PDF", "category": "dashboard", "complexity": 3.0, "risk": "low", "modules": 4, "hours": 35},
+  {"text": "Real-time dashboard with WebSocket live data streaming and auto-refresh", "category": "dashboard", "complexity": 4.2, "risk": "high", "modules": 6, "hours": 60},
+  {"text": "Custom report builder with drag and drop chart components", "category": "dashboard", "complexity": 4.5, "risk": "high", "modules": 8, "hours": 80},
+  {"text": "KPI tracking dashboard with goal setting and progress indicators", "category": "dashboard", "complexity": 3.0, "risk": "low", "modules": 4, "hours": 35},
+
+  {"text": "RESTful API with CRUD operations authentication and rate limiting", "category": "api", "complexity": 3.0, "risk": "low", "modules": 4, "hours": 30},
+  {"text": "Third-party API integration with Salesforce CRM for contact sync", "category": "api", "complexity": 3.8, "risk": "medium", "modules": 5, "hours": 50},
+  {"text": "GraphQL API with nested queries mutations and subscription support", "category": "api", "complexity": 4.0, "risk": "high", "modules": 6, "hours": 65},
+  {"text": "Webhook system with event routing retry logic and delivery status", "category": "api", "complexity": 3.5, "risk": "medium", "modules": 5, "hours": 45},
+  {"text": "Payment gateway integration with Stripe webhooks and idempotency", "category": "api", "complexity": 4.3, "risk": "high", "modules": 6, "hours": 70},
+
+  {"text": "Responsive landing page with hero section features and testimonials", "category": "ui_design", "complexity": 1.5, "risk": "low", "modules": 3, "hours": 15},
+  {"text": "Multi-step wizard form with validation progress bar and draft save", "category": "ui_design", "complexity": 2.5, "risk": "low", "modules": 4, "hours": 25},
+  {"text": "Drag and drop file upload with preview progress and chunked upload", "category": "ui_design", "complexity": 3.2, "risk": "medium", "modules": 4, "hours": 35},
+  {"text": "Real-time chat interface with message history file sharing and typing indicators", "category": "ui_design", "complexity": 4.0, "risk": "high", "modules": 7, "hours": 60},
+  {"text": "Notification center with email SMS push and in-app notification channels", "category": "ui_design", "complexity": 3.8, "risk": "medium", "modules": 6, "hours": 50},
+
+  {"text": "Blog system with rich text editor categories tags and SEO optimization", "category": "content_management", "complexity": 3.0, "risk": "low", "modules": 6, "hours": 40},
+  {"text": "CMS with page builder content versioning and workflow approval", "category": "content_management", "complexity": 4.5, "risk": "high", "modules": 10, "hours": 90},
+  {"text": "Multi-language content management with translation workflow", "category": "content_management", "complexity": 4.2, "risk": "high", "modules": 8, "hours": 75},
+  {"text": "Media library with image optimization video transcoding and CDN", "category": "content_management", "complexity": 4.0, "risk": "medium", "modules": 6, "hours": 55},
+
+  {"text": "Email marketing system with template builder scheduling and analytics", "category": "marketing", "complexity": 4.0, "risk": "medium", "modules": 8, "hours": 65},
+  {"text": "SEO audit tool with keyword analysis backlink checker and recommendations", "category": "marketing", "complexity": 4.5, "risk": "high", "modules": 10, "hours": 85},
+  {"text": "Social media scheduler with content calendar and analytics reporting", "category": "marketing", "complexity": 4.2, "risk": "medium", "modules": 8, "hours": 70},
+  {"text": "Landing page A/B testing with variant creation and conversion tracking", "category": "marketing", "complexity": 3.5, "risk": "medium", "modules": 5, "hours": 45},
+
+  {"text": "User profile management with avatar upload activity history and preferences", "category": "general", "complexity": 2.0, "risk": "low", "modules": 3, "hours": 20},
+  {"text": "Search functionality with autocomplete filters and recent searches", "category": "general", "complexity": 2.8, "risk": "low", "modules": 4, "hours": 28},
+  {"text": "Settings page with theme toggle language selection and account deletion", "category": "general", "complexity": 1.8, "risk": "low", "modules": 3, "hours": 15},
+  {"text": "File management system with folders sharing permissions and version control", "category": "general", "complexity": 3.8, "risk": "medium", "modules": 6, "hours": 50},
+  {"text": "Activity log with timestamps user tracking and export capabilities", "category": "general", "complexity": 2.5, "risk": "low", "modules": 3, "hours": 22},
+  {"text": "Geolocation based feature with map integration address autocomplete and routing", "category": "integration", "complexity": 4.0, "risk": "medium", "modules": 5, "hours": 55},
+  {"text": "Video conferencing integration with recording screen sharing and chat", "category": "integration", "complexity": 5.0, "risk": "critical", "modules": 8, "hours": 100},
+  {"text": "CRM integration with contact sync deal tracking and pipeline management", "category": "integration", "complexity": 4.5, "risk": "high", "modules": 9, "hours": 80},
+  {"text": "Inventory API integration with warehouse sync and stock reconciliation", "category": "integration", "complexity": 4.2, "risk": "high", "modules": 7, "hours": 65},
+  {"text": "AI chatbot integration with natural language processing and intent recognition", "category": "integration", "complexity": 5.0, "risk": "critical", "modules": 10, "hours": 110}
+]
