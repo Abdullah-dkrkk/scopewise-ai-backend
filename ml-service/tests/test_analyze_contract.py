@@ -74,10 +74,12 @@ class TestAnalyzeContract:
         assert body["risk"]["total_risk_factors"] == len(body["risk"]["factors"])
         assert "total_estimated_hours" in body["timeline"]
 
-    def test_engine_is_an_honest_source_label(self, client):
+    def test_engine_is_always_the_local_pipeline(self, client):
         body = client.post("/analyze", json={"text": PAYMENT_REQUIREMENT}, headers=AUTH_HEADERS).get_json()
 
-        assert body["engine"] in ("local", "gemini")
+        # The service never calls an external model API; every analysis is
+        # produced by the deterministic local pipeline.
+        assert body["engine"] == "local"
 
     def test_needs_clarification_is_always_a_boolean(self, client):
         body = client.post("/analyze", json={"text": PAYMENT_REQUIREMENT}, headers=AUTH_HEADERS).get_json()
@@ -106,6 +108,32 @@ class TestAnalyzeContract:
 
         assert body["needs_clarification"] is False
         assert "estimate_band" not in body
+
+    def test_vague_terms_are_quoted_back_in_the_questions(self, client):
+        body = client.post(
+            "/analyze",
+            json={"text": "Build a shop with products, orders, etc and some other stuff"},
+            headers=AUTH_HEADERS,
+        ).get_json()
+
+        joined = " ".join(question["question"] for question in body["questions"])
+
+        # The generator must quote the customer's own filler words, not ask a
+        # generic canned question.
+        assert "etc" in joined
+
+    def test_punctuation_only_input_is_not_invented(self, client):
+        body = client.post("/analyze", json={"text": "!!! ??? ,,,"}, headers=AUTH_HEADERS).get_json()
+
+        # No alphabetic word means no category signal: the service must say so
+        # instead of letting character n-grams guess a category.
+        assert body["classification"]["category"] == "general"
+        assert body["classification"]["confidence"] == 0.0
+
+    def test_service_has_no_external_model_configuration(self):
+        settings = Settings(api_key=API_KEY, allow_anonymous=False)
+
+        assert not any(name.startswith("gemini") for name in vars(settings))
 
     def test_complexity_score_is_within_the_persisted_range(self, client):
         body = client.post(

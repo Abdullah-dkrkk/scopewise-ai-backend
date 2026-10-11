@@ -1,42 +1,102 @@
-import json
 import logging
 import re
 from functools import lru_cache
 
 import joblib
 import numpy as np
+from scipy import sparse
+from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.ensemble import GradientBoostingRegressor
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.pipeline import Pipeline
 
 from core.paths import COMPLEXITY_MODEL_PATH as MODEL_PATH
-from core.paths import REQUIREMENTS_DATA_PATH as TRAINING_DATA_PATH
 
 logger = logging.getLogger(__name__)
 
 
 COMPLEXITY_KEYWORDS = {
-    'high': [
-        'real-time', 'realtime', 'real time', 'concurrent', 'parallel',
-        'distributed', 'microservice', 'scalable', 'high-availability',
-        'load balanc', 'caching', 'cdn', 'websocket', 'streaming',
-        'machine learning', 'ai', 'artificial intelligence', 'neural',
-        'blockchain', 'encryption', 'security', 'authentication',
-        'payment', 'financial', 'pci', 'hipaa', 'compliance',
-        'integration', 'api', 'webhook', 'oauth', 'sso',
+    "high": [
+        "real-time",
+        "realtime",
+        "real time",
+        "concurrent",
+        "parallel",
+        "distributed",
+        "microservice",
+        "scalable",
+        "high-availability",
+        "load balanc",
+        "caching",
+        "cdn",
+        "websocket",
+        "streaming",
+        "machine learning",
+        "ai",
+        "artificial intelligence",
+        "neural",
+        "blockchain",
+        "encryption",
+        "security",
+        "authentication",
+        "payment",
+        "financial",
+        "pci",
+        "hipaa",
+        "compliance",
+        "integration",
+        "api",
+        "webhook",
+        "oauth",
+        "sso",
     ],
-    'medium': [
-        'dashboard', 'analytics', 'report', 'export', 'import',
-        'search', 'filter', 'sort', 'pagination', 'crud',
-        'notification', 'email', 'sms', 'push', 'template',
-        'upload', 'download', 'file', 'image', 'video',
-        'calendar', 'scheduling', 'reminder', 'notification',
-        'role', 'permission', 'access', 'admin', 'management',
+    "medium": [
+        "dashboard",
+        "analytics",
+        "report",
+        "export",
+        "import",
+        "search",
+        "filter",
+        "sort",
+        "pagination",
+        "crud",
+        "notification",
+        "email",
+        "sms",
+        "push",
+        "template",
+        "upload",
+        "download",
+        "file",
+        "image",
+        "video",
+        "calendar",
+        "scheduling",
+        "reminder",
+        "notification",
+        "role",
+        "permission",
+        "access",
+        "admin",
+        "management",
     ],
-    'low': [
-        'landing page', 'static', 'simple', 'basic', 'minimal',
-        'display', 'show', 'list', 'view', 'read',
-        'text', 'content', 'page', 'form', 'input',
+    "low": [
+        "landing page",
+        "static",
+        "simple",
+        "basic",
+        "minimal",
+        "display",
+        "show",
+        "list",
+        "view",
+        "read",
+        "text",
+        "content",
+        "page",
+        "form",
+        "input",
     ],
 }
 
@@ -44,79 +104,167 @@ COMPLEXITY_KEYWORDS = {
 def extract_features(text: str) -> dict:
     text_lower = text.lower()
     word_count = len(text.split())
-    sentence_count = max(len(re.split(r'[.!?]+', text.strip())), 1)
+    sentence_count = max(len(re.split(r"[.!?]+", text.strip())), 1)
     avg_word_length = np.mean([len(w) for w in text.split()]) if text.split() else 0
 
     tech_terms = [
-        'api', 'rest', 'graphql', 'database', 'sql', 'nosql', 'redis',
-        'cache', 'queue', 'cron', 'socket', 'webhook', 'oauth', 'jwt',
-        'docker', 'kubernetes', 'ci/cd', 'aws', 'azure', 'gcp',
-        'react', 'vue', 'angular', 'laravel', 'django', 'flask', 'node',
-        'mysql', 'postgresql', 'mongodb', 'elasticsearch',
+        "api",
+        "rest",
+        "graphql",
+        "database",
+        "sql",
+        "nosql",
+        "redis",
+        "cache",
+        "queue",
+        "cron",
+        "socket",
+        "webhook",
+        "oauth",
+        "jwt",
+        "docker",
+        "kubernetes",
+        "ci/cd",
+        "aws",
+        "azure",
+        "gcp",
+        "react",
+        "vue",
+        "angular",
+        "laravel",
+        "django",
+        "flask",
+        "node",
+        "mysql",
+        "postgresql",
+        "mongodb",
+        "elasticsearch",
     ]
     tech_count = sum(1 for term in tech_terms if term in text_lower)
 
     integration_terms = [
-        'integrate', 'integration', 'third-party', 'third party',
-        'external', 'webhook', 'api', 'sdk', 'plugin',
+        "integrate",
+        "integration",
+        "third-party",
+        "third party",
+        "external",
+        "webhook",
+        "api",
+        "sdk",
+        "plugin",
     ]
     integration_count = sum(1 for term in integration_terms if term in text_lower)
 
     security_terms = [
-        'security', 'secure', 'encrypt', 'decrypt', 'hash', 'token',
-        'authentication', 'authorization', 'permission', 'role', 'acl',
-        'ssl', 'tls', 'https', 'cors', 'csrf', 'xss', 'sql injection',
+        "security",
+        "secure",
+        "encrypt",
+        "decrypt",
+        "hash",
+        "token",
+        "authentication",
+        "authorization",
+        "permission",
+        "role",
+        "acl",
+        "ssl",
+        "tls",
+        "https",
+        "cors",
+        "csrf",
+        "xss",
+        "sql injection",
     ]
     security_count = sum(1 for term in security_terms if term in text_lower)
 
     realtime_terms = [
-        'real-time', 'realtime', 'live', 'streaming', 'websocket',
-        'socket', 'push', 'notification', 'instant', 'concurrent',
+        "real-time",
+        "realtime",
+        "live",
+        "streaming",
+        "websocket",
+        "socket",
+        "push",
+        "notification",
+        "instant",
+        "concurrent",
     ]
     realtime_count = sum(1 for term in realtime_terms if term in text_lower)
 
-    high_score = sum(1 for kw in COMPLEXITY_KEYWORDS['high'] if kw in text_lower)
-    med_score = sum(1 for kw in COMPLEXITY_KEYWORDS['medium'] if kw in text_lower)
-    low_score = sum(1 for kw in COMPLEXITY_KEYWORDS['low'] if kw in text_lower)
+    high_score = sum(1 for kw in COMPLEXITY_KEYWORDS["high"] if kw in text_lower)
+    med_score = sum(1 for kw in COMPLEXITY_KEYWORDS["medium"] if kw in text_lower)
+    low_score = sum(1 for kw in COMPLEXITY_KEYWORDS["low"] if kw in text_lower)
 
-    keyword_complexity = (high_score * 3 + med_score * 2 + low_score * 1) / max(high_score + med_score + low_score, 1)
+    keyword_complexity = (high_score * 3 + med_score * 2 + low_score * 1) / max(
+        high_score + med_score + low_score, 1
+    )
 
     return {
-        'word_count': word_count,
-        'sentence_count': sentence_count,
-        'avg_word_length': round(avg_word_length, 2),
-        'tech_density': tech_count,
-        'integration_signals': integration_count,
-        'security_signals': security_count,
-        'realtime_signals': realtime_count,
-        'keyword_complexity': round(keyword_complexity, 2),
-        'high_complexity_keywords': high_score,
-        'medium_complexity_keywords': med_score,
-        'low_complexity_keywords': low_score,
+        "word_count": word_count,
+        "sentence_count": sentence_count,
+        "avg_word_length": round(avg_word_length, 2),
+        "tech_density": tech_count,
+        "integration_signals": integration_count,
+        "security_signals": security_count,
+        "realtime_signals": realtime_count,
+        "keyword_complexity": round(keyword_complexity, 2),
+        "high_complexity_keywords": high_score,
+        "medium_complexity_keywords": med_score,
+        "low_complexity_keywords": low_score,
     }
 
 
+def _numeric_features(text: str) -> list[float]:
+    """Deterministic numeric side-signals that tree models pick up on."""
+    local = extract_features(text)
+
+    from core.feature_extractor import extract_features as extract_feature_groups
+
+    feature_count = extract_feature_groups(text)["total_features"]
+
+    return [
+        local["word_count"],
+        local["sentence_count"],
+        local["tech_density"],
+        local["integration_signals"],
+        local["security_signals"],
+        local["realtime_signals"],
+        feature_count,
+    ]
+
+
+class _ComplexityVectorizer(BaseEstimator, TransformerMixin):
+    """Word + character TF-IDF concatenated with numeric side-signals."""
+
+    def __init__(self, word_max: int = 4000, char_max: int = 3000) -> None:
+        self.word_max = word_max
+        self.char_max = char_max
+        self.word_tfidf = TfidfVectorizer(max_features=word_max, ngram_range=(1, 2), sublinear_tf=True)
+        self.char_tfidf = TfidfVectorizer(
+            analyzer="char_wb", ngram_range=(3, 5), max_features=char_max, sublinear_tf=True
+        )
+
+    def fit(self, X, y=None):  # noqa: ARG002 - sklearn API requires y in the signature
+        self.word_tfidf.fit(X)
+        self.char_tfidf.fit(X)
+        return self
+
+    def transform(self, X):
+        word = self.word_tfidf.transform(X)
+        char = self.char_tfidf.transform(X)
+        numeric = sparse.csr_matrix([_numeric_features(text) for text in X])
+        return sparse.hstack([word, char, numeric]).tocsr()
+
+
 def train_complexity_model() -> Pipeline:
-    with TRAINING_DATA_PATH.open(encoding="utf-8") as f:
-        data = json.load(f)
+    from core.data import load_corpus
 
-    texts = [item['text'] for item in data]
-    scores = [item['complexity'] for item in data]
+    data = load_corpus()
 
-    pipeline = Pipeline([
-        ('tfidf', TfidfVectorizer(
-            max_features=3000,
-            ngram_range=(1, 2),
-            sublinear_tf=True,
-        )),
-        ('reg', GradientBoostingRegressor(
-            n_estimators=100,
-            max_depth=4,
-            learning_rate=0.1,
-            random_state=42,
-        )),
-    ])
+    texts = [item["text"] for item in data]
+    scores = [float(item["complexity"]) for item in data]
 
+    pipeline = build_complexity_model()
     pipeline.fit(texts, scores)
 
     logger.info("Complexity model trained on %d samples", len(texts))
@@ -130,6 +278,25 @@ def train_complexity_model() -> Pipeline:
     return pipeline
 
 
+def build_complexity_model() -> Pipeline:
+    """A fresh, unfitted complexity pipeline (shared with evaluation)."""
+    return Pipeline(
+        [
+            ("vec", _ComplexityVectorizer()),
+            (
+                "reg",
+                GradientBoostingRegressor(
+                    n_estimators=300,
+                    max_depth=4,
+                    learning_rate=0.06,
+                    subsample=0.9,
+                    random_state=42,
+                ),
+            ),
+        ]
+    )
+
+
 def predict_complexity(text: str) -> dict:
     features = extract_features(text)
 
@@ -140,29 +307,31 @@ def predict_complexity(text: str) -> dict:
     ml_score = float(model.predict([text])[0])
     ml_score = max(1.0, min(5.0, ml_score))
 
-    keyword_score = features['keyword_complexity']
+    keyword_score = features["keyword_complexity"]
     keyword_score = max(1.0, min(5.0, keyword_score))
 
-    final_score = 0.6 * ml_score + 0.4 * keyword_score
+    # The model is now the senior partner; the keyword heuristic only steadies
+    # the estimate when the model is unsure or the text is very short.
+    final_score = 0.7 * ml_score + 0.3 * keyword_score
     final_score = round(max(1.0, min(5.0, final_score)), 2)
 
     if final_score >= 4.5:
-        level = 'critical'
+        level = "critical"
     elif final_score >= 3.5:
-        level = 'high'
+        level = "high"
     elif final_score >= 2.5:
-        level = 'medium'
+        level = "medium"
     else:
-        level = 'low'
+        level = "low"
 
     return {
-        'complexity_score': final_score,
-        'complexity_level': level,
-        'features': features,
-        'breakdown': {
-            'ml_score': round(ml_score, 2),
-            'keyword_score': round(keyword_score, 2),
-            'weighted_final': round(final_score, 2),
+        "complexity_score": final_score,
+        "complexity_level": level,
+        "features": features,
+        "breakdown": {
+            "ml_score": round(ml_score, 2),
+            "keyword_score": round(keyword_score, 2),
+            "weighted_final": round(final_score, 2),
         },
     }
 

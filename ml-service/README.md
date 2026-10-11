@@ -1,8 +1,12 @@
 # ScopeWise ML Service
 
 Internal Flask inference service for ScopeWise AI. It classifies requirements,
-scores complexity, detects features, assesses risk, generates clarification
-questions and estimates a delivery timeline.
+scores complexity, detects features, assesses risk, estimates hours, generates
+clarification questions and estimates a delivery timeline.
+
+Everything runs locally and deterministically: there is no external model API,
+no API key and no network call during analysis. The only network egress is at
+build time, when the NLTK corpora are downloaded.
 
 The Laravel backend is the only intended caller. The service authenticates every
 request with a shared secret and must never be exposed on a public interface.
@@ -55,6 +59,7 @@ serving inference unauthenticated.
 | `ML_MIN_TEXT_LENGTH` | `3` | |
 | `ML_MAX_TEXT_LENGTH` | `20000` | Must match the Laravel request rule |
 | `ML_MAX_CONTENT_LENGTH` | `65536` | Whole-body cap in bytes |
+| `ML_MAX_QUESTIONS` | `15` | Cap on clarifying questions returned per analysis |
 | `ML_HOST` / `ML_PORT` | `0.0.0.0` / `5000` | |
 | `ML_DEBUG` | `false` | Never enable in production |
 
@@ -72,8 +77,8 @@ export ML_ALLOW_ANONYMOUS=true   # Windows: $env:ML_ALLOW_ANONYMOUS="true"
 python app.py
 ```
 
-`python app.py --train` retrains both models from
-`training_data/requirements.json` without starting the server.
+`python app.py --train` retrains all three models (classifier, complexity and
+hours) from `training_data/requirements.json` without starting the server.
 
 ## Tests
 
@@ -85,7 +90,9 @@ pytest
 `tests/test_api.py` covers the HTTP contract: authentication, input validation,
 the JSON error contract and non-leakage of internal errors. `tests/test_core.py`
 covers the deterministic modules: feature extraction, risk scoring, timeline
-reconciliation and question generation.
+reconciliation and question generation. `tests/test_clarity.py` covers the
+vagueness/clarification rules and estimate bands. `tests/test_analyze_contract.py`
+pins the end-to-end `/analyze` response shape.
 
 ## Production deployment
 
@@ -98,9 +105,11 @@ docker run -d --name scopewise-ml \
   scopewise-ml:latest
 ```
 
-The image is a single stage by design: models are trained from the checked-in
-corpus and the NLTK corpora are downloaded at build time, so the running
-container needs no network access and serves the first request at full speed.
+The image is a single stage by design: the pre-trained, reviewed models are
+baked in from `saved_models/` and the NLTK corpora are downloaded at build time,
+so the running container needs no network access and serves the first request at
+full speed. Because there is no external model API, the container only needs the
+shared service secret.
 
 Gunicorn runs one worker with four threads. The models are memory-heavy, so
 multiple workers would duplicate them; threads handle concurrent analysis calls
@@ -122,6 +131,7 @@ docker run --rm -v "$PWD/saved_models:/app/saved_models" \
   scopewise-ml:latest python app.py --train
 ```
 
-`classifier.pkl` and `complexity.pkl` are loaded once per process and cached.
-Retraining clears the cache so subsequent requests in the same process see the
-new model.
+`classifier.pkl`, `complexity.pkl` and `hours.pkl` are loaded once per process
+and cached. Retraining clears the cache so subsequent requests in the same
+process see the new model. Commit the regenerated `saved_models/*.pkl` so the
+next image build ships the updated models.

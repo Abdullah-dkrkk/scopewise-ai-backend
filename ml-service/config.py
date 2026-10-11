@@ -116,24 +116,9 @@ class Settings:
     host: str = field(default_factory=lambda: os.getenv("ML_HOST", "0.0.0.0"))  # noqa: S104
     port: int = field(default_factory=lambda: _env_int("ML_PORT", 5000))
 
-    # ------------------------------------------------------------------
-    # Optional Gemini refinement layer (free tier).
-    # ------------------------------------------------------------------
-    # When GEMINI_API_KEY is empty the service runs the deterministic local
-    # pipeline exactly as before. When set, Gemini refines classification,
-    # risk factors and — most importantly — produces pinpointed, text-derived
-    # scope-creep questions, and flags highly vague requirements.
-    gemini_api_key: str = field(default_factory=lambda: os.getenv("GEMINI_API_KEY", "").strip())
-    # gemini-3.8-flash is the current generateContent model; keep the older
-    # aliases as fallbacks so a model retirement never breaks the service.
-    gemini_model: str = field(default_factory=lambda: os.getenv("GEMINI_MODEL", "gemini-3.8-flash").strip())
-    gemini_model_fallbacks: list[str] = field(
-        default_factory=lambda: _env_list("GEMINI_MODEL_FALLBACKS")
-        or ["gemini-flash-latest", "gemini-3.5-flash", "gemini-3-flash-preview"]
-    )
-    gemini_timeout: int = field(default_factory=lambda: _env_int("GEMINI_TIMEOUT", 25))
-    gemini_max_questions: int = field(default_factory=lambda: _env_int("GEMINI_MAX_QUESTIONS", 8))
-    gemini_max_risk_factors: int = field(default_factory=lambda: _env_int("GEMINI_MAX_RISK_FACTORS", 8))
+    # Maximum number of clarifying questions the deterministic generator may
+    # return for one requirement.
+    max_questions: int = field(default_factory=lambda: _env_int("ML_MAX_QUESTIONS", 15))
 
     @property
     def requires_authentication(self) -> bool:
@@ -148,9 +133,6 @@ class Settings:
                 "ML_SERVICE_API_KEY must be set when ML_ALLOW_ANONYMOUS is not enabled. "
                 "Set ML_ALLOW_ANONYMOUS=true for local development only."
             )
-
-        if self.gemini_timeout <= 0:
-            problems.append("GEMINI_TIMEOUT must be greater than zero")
 
         if self.min_text_length > self.max_text_length:
             problems.append("ML_MIN_TEXT_LENGTH cannot be greater than ML_MAX_TEXT_LENGTH")

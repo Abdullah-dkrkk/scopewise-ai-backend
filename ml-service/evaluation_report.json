@@ -1,0 +1,83 @@
+{
+  "corpus_size": 4777,
+  "train_samples": 3821,
+  "test_samples": 956,
+  "test_split": 0.2,
+  "classification": {
+    "accuracy": 0.9519,
+    "macro_f1": 0.9518,
+    "per_category": {
+      "api": {
+        "precision": 0.9444,
+        "recall": 0.9623,
+        "f1": 0.9533,
+        "samples": 106
+      },
+      "authentication": {
+        "precision": 0.9524,
+        "recall": 0.9434,
+        "f1": 0.9479,
+        "samples": 106
+      },
+      "content_management": {
+        "precision": 0.951,
+        "recall": 0.9238,
+        "f1": 0.9372,
+        "samples": 105
+      },
+      "dashboard": {
+        "precision": 0.9266,
+        "recall": 0.9528,
+        "f1": 0.9395,
+        "samples": 106
+      },
+      "e-commerce": {
+        "precision": 0.9279,
+        "recall": 0.9537,
+        "f1": 0.9406,
+        "samples": 108
+      },
+      "general": {
+        "precision": 0.9626,
+        "recall": 0.9626,
+        "f1": 0.9626,
+        "samples": 107
+      },
+      "integration": {
+        "precision": 0.963,
+        "recall": 0.9811,
+        "f1": 0.972,
+        "samples": 106
+      },
+      "marketing": {
+        "precision": 0.9796,
+        "recall": 0.9143,
+        "f1": 0.9458,
+        "samples": 105
+      },
+      "ui_design": {
+        "precision": 0.963,
+        "recall": 0.972,
+        "f1": 0.9674,
+        "samples": 107
+      }
+    },
+    "test_samples": 956
+  },
+  "complexity": {
+    "regression": {
+      "mae": 0.201,
+      "mape_percent": 6.17,
+      "r2": 0.9097
+    },
+    "test_samples": 956
+  },
+  "hours": {
+    "regression": {
+      "mae": 13.34,
+      "mape_percent": 15.63,
+      "r2": 0.9337
+    },
+    "test_samples": 956
+  }
+}

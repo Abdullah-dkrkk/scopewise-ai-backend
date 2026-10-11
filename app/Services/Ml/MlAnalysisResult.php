@@ -107,12 +107,10 @@ final class MlAnalysisResult
             complexityScore: $complexityScore,
             riskLevel: $riskLevel,
             estimatedHours: $estimatedHours,
-            // Honest attribution: "gemini_refined" when the LLM layer
-            // contributed understanding, "ml_service" for the pure local
-            // pipeline. Hours always come from the deterministic estimator.
-            estimationMethod: (string) data_get($payload, 'engine', 'local') === 'gemini'
-                ? 'gemini_refined'
-                : 'ml_service',
+            // Honest attribution: the ML service is the only source for a
+            // machine-generated analysis. Hours always come from its
+            // deterministic estimator.
+            estimationMethod: 'ml_service',
             modules: self::normalizeModules(data_get($payload, 'modules')),
             riskFactors: self::normalizeRiskFactors(data_get($payload, 'risk.factors')),
             summary: self::stringOrNull(data_get($payload, 'summary'), 2000),

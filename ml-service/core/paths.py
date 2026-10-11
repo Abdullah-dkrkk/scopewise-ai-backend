@@ -16,4 +16,7 @@ TRAINING_DATA_DIR = SERVICE_ROOT / "training_data"
 
 CLASSIFIER_MODEL_PATH = MODEL_DIR / "classifier.pkl"
 COMPLEXITY_MODEL_PATH = MODEL_DIR / "complexity.pkl"
+HOURS_MODEL_PATH = MODEL_DIR / "hours.pkl"
 REQUIREMENTS_DATA_PATH = TRAINING_DATA_DIR / "requirements.json"
+USER_FEEDBACK_PATH = TRAINING_DATA_DIR / "user_feedback.jsonl"
+EVALUATION_REPORT_PATH = SERVICE_ROOT / "evaluation_report.json"

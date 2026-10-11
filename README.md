@@ -8,7 +8,7 @@ Laravel-based backend API for ScopeWise AI - an intelligent web-based system for
 - MySQL/PostgreSQL (SQLite for local development)
 - Laravel Sanctum (Authentication)
 - Swagger/OpenAPI (API Documentation)
-- Flask + scikit-learn (ML inference service, separate container)
+- Flask + scikit-learn (self-contained ML inference service, separate container; no external AI API)
 
 ## Architecture
 

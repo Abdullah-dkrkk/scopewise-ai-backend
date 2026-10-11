@@ -22,13 +22,13 @@ from werkzeug.exceptions import HTTPException
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from config import Settings, load_settings  # noqa: E402
+from core.data import record_feedback  # noqa: E402
 from nltk_setup import ensure_nltk_data  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
 TOKEN_HEADER = "X-Service-Token"  # noqa: S105 - header name, not a secret
 AUTH_HEADER = "Authorization"
-MAX_QUESTION_COUNT = 15
 
 
 class ApiError(Exception):
@@ -42,10 +42,18 @@ class ApiError(Exception):
 
 
 def _models_are_ready() -> bool:
-    """Whether both persisted models are present."""
-    from core.paths import CLASSIFIER_MODEL_PATH, COMPLEXITY_MODEL_PATH
+    """Whether every persisted model is present."""
+    from core.paths import (
+        CLASSIFIER_MODEL_PATH,
+        COMPLEXITY_MODEL_PATH,
+        HOURS_MODEL_PATH,
+    )
 
-    return CLASSIFIER_MODEL_PATH.exists() and COMPLEXITY_MODEL_PATH.exists()
+    return (
+        CLASSIFIER_MODEL_PATH.exists()
+        and COMPLEXITY_MODEL_PATH.exists()
+        and HOURS_MODEL_PATH.exists()
+    )
 
 
 def warm_up_models() -> bool:
@@ -68,9 +76,11 @@ def warm_up_models() -> bool:
     try:
         from core.classifier import load_classifier
         from core.complexity import load_complexity_model
+        from core.hours import load_hours_model
 
         classifier = load_classifier()
         complexity = load_complexity_model()
+        hours = load_hours_model()
 
         # NLTK resources are loaded on first use inside the classifier, so
         # exercise that path too rather than leaving it for a real request.
@@ -78,7 +88,7 @@ def warm_up_models() -> bool:
 
         preprocess_text("users can log in and reset their password")
 
-        if classifier is None or complexity is None:
+        if classifier is None or complexity is None or hours is None:
             logger.warning("Warm-up incomplete: a model failed to load")
             return False
     except Exception:
@@ -86,10 +96,11 @@ def warm_up_models() -> bool:
         return False
 
     logger.info(
-        "Models warmed in %.2fs (classifier=%s, complexity=%s)",
+        "Models warmed in %.2fs (classifier=%s, complexity=%s, hours=%s)",
         time.perf_counter() - started,
         type(classifier).__name__,
         type(complexity).__name__,
+        type(hours).__name__,
     )
 
     return True
@@ -282,23 +293,22 @@ def create_app(settings: Settings | None = None, *, warm_up: bool = True) -> Fla
     def analyze():
         text = extract_text()
 
-        from core.classifier import classify_requirement
-        from core.complexity import predict_complexity
-        from core.feature_extractor import extract_features
-        from core.question_generator import generate_questions
-        from core.risk_scorer import assess_risk
-        from core.timeline_estimator import estimate_timeline
-        from core.llm import (
-            build_prompt,
-            call_gemini,
+        from core.clarity import (
             estimate_margin,
-            normalize_llm_output,
             rule_based_vagueness,
             split_clarifications,
         )
+        from core.classifier import classify_requirement
+        from core.complexity import predict_complexity
+        from core.feature_extractor import extract_features
+        from core.hours import estimate_total_hours
+        from core.question_generator import generate_questions
+        from core.risk_scorer import assess_risk
+        from core.timeline_estimator import estimate_timeline
 
         # ------------------------------------------------------------------
-        # 1. Deterministic pipeline (the numbers engine, always on).
+        # 1. Deterministic pipeline (the whole engine — no network, no model
+        #    API, fully reproducible).
         # ------------------------------------------------------------------
         classification = classify_requirement(text)
         category = classification["predicted_category"]
@@ -310,6 +320,14 @@ def create_app(settings: Settings | None = None, *, warm_up: bool = True) -> Fla
         detected_features = features["feature_summary"]
         feature_count = features["total_features"]
 
+        # Blend the corpus-trained regressor with the feature-based sum so the
+        # headline hours are calibrated, then scale the per-module hours by the
+        # same ratio so modules still reconcile with the total.
+        hours = estimate_total_hours(text, features["total_estimated_hours"])
+        total_hours = hours["hours"]
+        feature_hours = max(hours["feature_hours"], 1.0)
+        module_scale = total_hours / feature_hours
+
         risk = assess_risk(
             text=text,
             complexity_score=complexity_score,
@@ -320,42 +338,13 @@ def create_app(settings: Settings | None = None, *, warm_up: bool = True) -> Fla
         timeline = estimate_timeline(
             complexity_score=complexity_score,
             feature_count=feature_count,
-            total_estimated_hours=features["total_estimated_hours"],
+            total_estimated_hours=total_hours,
             risk_level=risk["overall_risk"],
             complexity_level=complexity["complexity_level"],
         )
 
         # ------------------------------------------------------------------
-        # 2. Optional Gemini refinement layer (understanding + questions).
-        # ------------------------------------------------------------------
-        engine = "local"
-        gemini = None
-
-        if settings.gemini_api_key:
-            gemini = normalize_llm_output(
-                call_gemini(
-                    settings.gemini_api_key,
-                    settings.gemini_model,
-                    build_prompt(
-                        text,
-                        max_questions=settings.gemini_max_questions,
-                        max_risk_factors=settings.gemini_max_risk_factors,
-                    ),
-                    timeout=settings.gemini_timeout,
-                    fallbacks=tuple(settings.gemini_model_fallbacks),
-                ),
-                max_questions=settings.gemini_max_questions,
-                max_risk_factors=settings.gemini_max_risk_factors,
-            )
-
-            if gemini is not None:
-                engine = "gemini"
-                category = gemini["category"]
-                classification["predicted_category"] = category
-                classification["confidence"] = gemini["confidence"]
-
-        # ------------------------------------------------------------------
-        # 3. Vagueness detection — deterministic rules + Gemini verdict.
+        # 2. Vagueness detection — deterministic rules only.
         #
         # The backend appends answered clarifying questions as a trailing
         # "Clarifications:" block. Once answers exist the requirement has been
@@ -364,52 +353,35 @@ def create_app(settings: Settings | None = None, *, warm_up: bool = True) -> Fla
         # ------------------------------------------------------------------
         base_text, clarifications = split_clarifications(text)
         rule_vague, rule_reason = rule_based_vagueness(base_text)
-        llm_vague = bool(gemini and gemini["is_vague"])
         clarified = len(clarifications) > 0
 
-        if llm_vague:
-            needs_clarification = llm_vague and not clarified
-            clarification_reason = gemini["vagueness_reason"] or rule_reason
-        else:
-            needs_clarification = rule_vague and not clarified
-            clarification_reason = rule_reason
+        needs_clarification = rule_vague and not clarified
+        clarification_reason = rule_reason if needs_clarification else None
 
         # ------------------------------------------------------------------
-        # 4. Questions — Gemini's pinpointed ones when available, otherwise
-        #    the deterministic templates. The vague path always carries the
-        #    pointed questions so the owner can answer them.
+        # 3. Questions — deterministic, text-aware templates that quote the
+        #    customer's own words. The vague path always carries them.
         # ------------------------------------------------------------------
-        if gemini and gemini["questions"]:
-            questions = gemini["questions"]
-            summary = gemini["summary"] or _generate_summary(
-                category=category,
-                complexity_score=complexity_score,
-                complexity_level=complexity["complexity_level"],
-                risk_level=risk["overall_risk"],
-                feature_count=feature_count,
-                estimated_hours=timeline["total_estimated_hours"],
-                timeline_weeks=timeline["recommended_timeline_weeks"],
-            )
-        else:
-            questions = generate_questions(
-                text=text,
-                category=category,
-                complexity_score=complexity_score,
-                detected_features=detected_features,
-            )[:MAX_QUESTION_COUNT]
-            summary = _generate_summary(
-                category=category,
-                complexity_score=complexity_score,
-                complexity_level=complexity["complexity_level"],
-                risk_level=risk["overall_risk"],
-                feature_count=feature_count,
-                estimated_hours=timeline["total_estimated_hours"],
-                timeline_weeks=timeline["recommended_timeline_weeks"],
-            )
+        questions = generate_questions(
+            text=base_text,
+            category=category,
+            complexity_score=complexity_score,
+            detected_features=detected_features,
+            max_questions=settings.max_questions,
+        )
+
+        summary = _generate_summary(
+            category=category,
+            complexity_score=complexity_score,
+            complexity_level=complexity["complexity_level"],
+            risk_level=risk["overall_risk"],
+            feature_count=feature_count,
+            estimated_hours=total_hours,
+            timeline_weeks=timeline["recommended_timeline_weeks"],
+        )
 
         # ------------------------------------------------------------------
-        # 5. Risk factors — Gemini's text-derived factors merged with the
-        #    deterministic ones, deduplicated by factor name.
+        # 4. Risk factors — deterministic, category- and text-derived.
         # ------------------------------------------------------------------
         risk_factors = [
             {
@@ -420,28 +392,6 @@ def create_app(settings: Settings | None = None, *, warm_up: bool = True) -> Fla
             }
             for factor in risk["risk_factors"]
         ]
-
-        if gemini and gemini["risk_factors"]:
-            seen_factors = {factor["factor"].lower() for factor in risk_factors}
-
-            for factor in gemini["risk_factors"]:
-                factor_key = factor["factor"].lower()
-
-                if factor_key in seen_factors:
-                    continue
-
-                seen_factors.add(factor_key)
-                risk_factors.append(
-                    {
-                        "factor": factor["factor"],
-                        "level": factor["level"],
-                        "description": factor["reason"],
-                        "mitigation": factor["mitigation"],
-                    }
-                )
-
-                if len(risk_factors) >= 12:
-                    break
 
         modules = []
         for feat in features["features"]:
@@ -455,7 +405,7 @@ def create_app(settings: Settings | None = None, *, warm_up: bool = True) -> Fla
                     "complexity": round(
                         min(5.0, complexity_score * (feat["match_count"] / max(feature_count, 1))), 2
                     ),
-                    "estimated_hours": feat["estimated_hours"],
+                    "estimated_hours": round(feat["estimated_hours"] * module_scale, 2),
                 }
             )
 
@@ -465,12 +415,12 @@ def create_app(settings: Settings | None = None, *, warm_up: bool = True) -> Fla
                     "name": "Core Implementation",
                     "description": "Basic implementation of the described requirement",
                     "complexity": complexity_score,
-                    "estimated_hours": max(4.0, complexity_score * 4),
+                    "estimated_hours": total_hours,
                 }
             )
 
         response = {
-            "engine": engine,
+            "engine": "local",
             "needs_clarification": needs_clarification,
             "clarification_reason": clarification_reason,
             "classification": {
@@ -481,7 +431,11 @@ def create_app(settings: Settings | None = None, *, warm_up: bool = True) -> Fla
             "complexity": {
                 "score": complexity_score,
                 "level": complexity["complexity_level"],
-                "breakdown": complexity["breakdown"],
+                "breakdown": {
+                    **complexity["breakdown"],
+                    "hours_model": hours["model_hours"],
+                    "hours_features": hours["feature_hours"],
+                },
             },
             "features": {
                 "detected": features["features"],
@@ -501,11 +455,29 @@ def create_app(settings: Settings | None = None, *, warm_up: bool = True) -> Fla
         }
 
         # --------------------------------------------------------------
-        # 6. Vague input: instead of a fake-precise single number, return a
+        # 5. Vague input: instead of a fake-precise single number, return a
         #    realistic provisional band around the deterministic estimate.
         # --------------------------------------------------------------
         if needs_clarification:
-            response["estimate_band"] = estimate_margin(timeline["total_estimated_hours"])
+            response["estimate_band"] = estimate_margin(total_hours)
+
+        # ---------------------------------------------
+        # 6. Learn from real traffic. Confident, specific analyses are
+        #    recorded (anonymised — no account id) so the next retrain keeps
+        #    improving on real user data. Never allowed to fail the request.
+        # ---------------------------------------------
+        record_feedback(
+            {
+                "_input_text": text,
+                "needs_clarification": needs_clarification,
+                "classification": {
+                    "category": category,
+                    "confidence": classification["confidence"],
+                },
+                "complexity": {"score": complexity_score},
+                "timeline": {"total_estimated_hours": total_hours},
+            }
+        )
 
         return jsonify(response)
 
@@ -567,7 +539,8 @@ def create_app(settings: Settings | None = None, *, warm_up: bool = True) -> Fla
                     category=classification["predicted_category"],
                     complexity_score=complexity["complexity_score"],
                     detected_features=features["feature_summary"],
-                )[:MAX_QUESTION_COUNT]
+                    max_questions=settings.max_questions,
+                )
             }
         )
 
@@ -612,9 +585,12 @@ def create_app(settings: Settings | None = None, *, warm_up: bool = True) -> Fla
 
         from core.classifier import train_classifier
         from core.complexity import train_complexity_model
+        from core.evaluation import run_evaluation
+        from core.hours import train_hours_model
 
         classifier = train_classifier()
         complexity_model = train_complexity_model()
+        hours_model = train_hours_model()
 
         logger.info("Models retrained via the training endpoint")
 
@@ -623,6 +599,8 @@ def create_app(settings: Settings | None = None, *, warm_up: bool = True) -> Fla
                 "status": "Models trained successfully",
                 "classifier_type": type(classifier).__name__,
                 "complexity_type": type(complexity_model).__name__,
+                "hours_type": type(hours_model).__name__,
+                "evaluation": run_evaluation(),
             }
         )
 
@@ -667,9 +645,11 @@ def _generate_summary(
 
 
 def train_models_from_cli() -> None:
-    """Train both models without starting the HTTP server."""
+    """Train all models (and evaluate) without starting the HTTP server."""
     from core.classifier import train_classifier
     from core.complexity import train_complexity_model
+    from core.evaluation import run_evaluation
+    from core.hours import train_hours_model
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
@@ -678,6 +658,12 @@ def train_models_from_cli() -> None:
 
     logger.info("Training complexity model...")
     train_complexity_model()
+
+    logger.info("Training hours model...")
+    train_hours_model()
+
+    logger.info("Running hold-out evaluation...")
+    run_evaluation()
 
     logger.info("Training complete.")
 

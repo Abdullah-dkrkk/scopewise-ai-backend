@@ -1,8 +1,9 @@
 # ScopeWise ML inference service
 #
-# Single-stage image: the models are trained from the checked-in corpus and the
-# NLTK corpora are downloaded at build time, so the running container needs no
-# network access and serves the first request at full speed.
+# Single-stage image: the pre-trained, reviewed models are baked in from
+# saved_models/ and the NLTK corpora are downloaded at build time, so the
+# running container needs no network access and serves the first request at
+# full speed. Retrain out-of-band (see README) and rebuild to update models.
 
 FROM python:3.13-slim AS runtime
 
